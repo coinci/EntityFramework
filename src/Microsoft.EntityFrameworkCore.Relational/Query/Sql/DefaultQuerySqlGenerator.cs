@@ -167,8 +167,8 @@ namespace Microsoft.EntityFrameworkCore.Query.Sql
 
             if (selectExpression.Predicate != null)
             {
-
-                var constantExpression = selectExpression.Predicate as ConstantExpression;
+                var nullSemanticsPredicate = ApplyNullSemantics(selectExpression.Predicate);
+                var constantExpression = nullSemanticsPredicate as ConstantExpression;
 
                 if (constantExpression == null
                     || !(bool)constantExpression.Value)
@@ -182,7 +182,7 @@ namespace Microsoft.EntityFrameworkCore.Query.Sql
                     }
                     else
                     {
-                        Visit(ApplyNullSemantics(selectExpression.Predicate));
+                        Visit(nullSemanticsPredicate);
 
                         if (selectExpression.Predicate is ParameterExpression
                             || selectExpression.Predicate.IsAliasWithColumnExpression()
@@ -235,6 +235,7 @@ namespace Microsoft.EntityFrameworkCore.Query.Sql
                     ? optimizedExpression
                     : new RelationalNullsExpandingVisitor().Visit(newExpression);
 
+            newExpression = new PredicateReductionExpressionOptimizer().Visit(newExpression);
             newExpression = new PredicateNegationExpressionOptimizer().Visit(newExpression);
             newExpression = new ReducingExpressionVisitor().Visit(newExpression);
 
@@ -821,6 +822,11 @@ namespace Microsoft.EntityFrameworkCore.Query.Sql
 
                 Visit(expression.Test);
 
+                if (expression.Test.IsSimpleExpression())
+                {
+                    _relationalCommandBuilder.Append(" = 1");
+                }
+
                 _relationalCommandBuilder.AppendLine();
                 _relationalCommandBuilder.Append("THEN ");
 
@@ -1238,19 +1244,45 @@ namespace Microsoft.EntityFrameworkCore.Query.Sql
 
                     object parameterValue;
                     if (parameter != null
-                        && _parameterValues.TryGetValue(parameter.Name, out parameterValue)
-                        && parameterValue == null)
+                        && _parameterValues.TryGetValue(parameter.Name, out parameterValue))
                     {
-                        var columnExpression
-                            = leftExpression.TryGetColumnExpression()
-                              ?? rightExpression.TryGetColumnExpression();
-
-                        if (columnExpression != null)
+                        if (parameterValue == null)
                         {
-                            return
-                                expression.NodeType == ExpressionType.Equal
-                                    ? (Expression)new IsNullExpression(columnExpression)
-                                    : Expression.Not(new IsNullExpression(columnExpression));
+                            var columnExpression
+                                = leftExpression.TryGetColumnExpression()
+                                  ?? rightExpression.TryGetColumnExpression();
+
+                            if (columnExpression != null)
+                            {
+                                return 
+                                    expression.NodeType == ExpressionType.Equal
+                                        ? (Expression)new IsNullExpression(columnExpression)
+                                        : Expression.Not(new IsNullExpression(columnExpression));
+                            }
+                        }
+
+                        var constantExpression
+                            = leftExpression as ConstantExpression
+                                ?? rightExpression as ConstantExpression;
+
+                        if (constantExpression != null)
+                        {
+                            if (parameterValue == null && constantExpression.Value == null)
+                            {
+                                return
+                                    expression.NodeType == ExpressionType.Equal
+                                    ? Expression.Constant(true)
+                                    : Expression.Constant(false);
+                            }
+
+                            if ((parameterValue == null && constantExpression.Value != null)
+                                || (parameterValue != null && constantExpression.Value == null))
+                            {
+                                return
+                                    expression.NodeType == ExpressionType.Equal
+                                    ? Expression.Constant(false)
+                                    : Expression.Constant(true);
+                            }
                         }
                     }
                 }
