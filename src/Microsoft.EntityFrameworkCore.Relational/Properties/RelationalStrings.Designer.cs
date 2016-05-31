@@ -213,7 +213,7 @@ namespace Microsoft.EntityFrameworkCore.Internal
         }
 
         /// <summary>
-        /// An ambient transaction has been detected. Connections opened by Entity Framework will not be enlisted in ambient transactions. To suppress this warning call SuppressAmbientTransactionWarning() when overriding DbContext.OnConfiguring.
+        /// An ambient transaction has been detected. Entity Framework Core does not support ambient transactions. To suppress this warning call ConfigureWarnings when overriding DbContext.OnConfiguring.
         /// </summary>
         public static string AmbientTransaction
         {
